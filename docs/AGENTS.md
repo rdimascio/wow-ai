@@ -11,7 +11,7 @@ The bridge can drive three coding agents: Claude Code, OpenAI Codex and xAI's Gr
 - A session belongs to the agent (and the folder) that made it. A chat that changes agent starts a fresh session with the new one; the transcript in the window stays.
 - The bridge's banner lists every agent with the executable it found, or what to install. A chat whose agent is missing gets a reply saying so instead of a hang.
 
-All of them run headless on the bridge PC, so log in once by hand in a terminal there (`claude`, `codex`, `grok login`, `agy`, `hermes setup`); the bridge reuses the cached login.
+All of them run headless on the bridge PC, so log in once by hand in a terminal there (`claude`, `codex`, `grok login`, `agy`, `hermes setup`); the bridge reuses the cached login. The `local` agent needs no login, only a running model server.
 
 ## The shared vocabulary
 
@@ -73,6 +73,14 @@ Codex also checks `CODEX_BIN` before searching `PATH`, so a newer launcher can o
 - **Command line:** `hermes chat --query-file - -Q --in <folder> --source tool [--resume <id>] [-m <model>] [--image <path>]`; the prompt is sent on stdin. Hermes writes plain reply text to stdout and `session_id: <id>` to stderr.
 - **Permissions:** `acceptEdits` is the default. `bypassPermissions` falls back to default; the bridge never passes `--yolo` and appends a note to the reply.
 - **Images and context:** the first image is passed with `--image`; additional paths are included in the prompt. The context block goes at the top of the prompt.
+
+## Local model (`local`)
+
+- **Install:** nothing to install in the bridge. Start an OpenAI-compatible server on the bridge PC, such as llama.cpp's `llama-server`. The suggested model and the exact command are in [CONFIGURATION.md](CONFIGURATION.md#the-local-agent).
+- **Command line:** the bridge runs its own `bridge/localagent.js --base-url <url> --model <m> --timeout-ms <n> [--mcp-config <file>] [--resume <id>]` with this node (`claude-wow local-agent …` from the binary). The system prompt and the message go in on stdin as one JSON object. The script prints Claude Code's stream-json, and the bridge reads it with Claude's parser, with the cost set to 0.
+- **Tools:** in `ask` chats the per-run MCP config holds the `wowdata` server. The script starts it over stdio, offers its tools to the model as OpenAI function tools named `mcp__wowdata__<tool>`, and runs at most 6 tool steps before it asks for an answer with no tools. The `wowgoals` tools, files, shell and web are not available.
+- **Session:** the script keeps the chat's messages in `~/.claude-wow/local-sessions/<id>.json` and resumes from it with `--resume`. The system prompt is sent fresh on every run, so a prompt change applies at once.
+- **Permissions and images:** there are none to set. It cannot see screenshots; a message with one gets a note saying so.
 
 ## Known limits
 
