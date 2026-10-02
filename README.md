@@ -50,21 +50,23 @@ The bridge drives whichever of these you have installed; each chat can use a dif
 
 `agent` in `~/.claude-wow/config.json` is the default (`claude`). `/claude -c --agent codex` switches the current chat, or right-click a chat in the left panel and pick **Agent...**; the reply bubbles and the game-chat echo are labelled with whoever answered. A session belongs to the agent that made it, so a chat that changes agent starts a fresh session there (its transcript stays). Install notes, the exact command lines, what each permission mode means per agent, and known limits are in [docs/AGENTS.md](docs/AGENTS.md).
 
-## Requirements
-
-- Windows (NTFS), or Linux with the game under Wine (see [docs/INSTALL-LINUX.md](docs/INSTALL-LINUX.md)), or macOS with a native client. python3 only if you use the deprecated pixel-capture fallback off Windows; the default screenshot transport needs nothing
-- World of Warcraft: Forever (tested on 1.60.1.69913 and 1.60.1.69977, TOC 16001) or World of Warcraft Classic Era (1.15.9.70003, TOC 11509), **windowed or borderless** (exclusive fullscreen blocks screen capture). Game data for reference tokens is synced per game: `claude-wow data sync` for Forever, `claude-wow data sync --flavor classic_era` for Classic Era; the bridge uses the one that matches the client
-- Nothing else for the installer and the Homebrew route: the bridge ships as one self-contained binary (macOS arm64 and x64, Linux x64, Windows x64). From a checkout it runs on [Node.js](https://nodejs.org) 22.2 or newer, or on [Bun](https://bun.sh)
-- At least one agent CLI, installed and logged in:
-  - [Claude Code](https://claude.com/claude-code): `claude --version` works
-  - [Codex](https://developers.openai.com/codex): `npm install -g @openai/codex`, then `codex` once to log in
-  - [Grok Build](https://docs.x.ai/build/overview): `irm https://x.ai/cli/install.ps1 | iex`, then `grok login`
-  - Antigravity (`agy`): install Google's Antigravity CLI, then run `agy` once to log in
-  - Hermes Agent (`hermes`): install it, then run `hermes setup` once
-
 ## Install
 
-One line, then a game relaunch. Full detail, every route and the background service: [docs/INSTALL.md](docs/INSTALL.md).
+Claude WoW has two parts, and you need both:
+
+- **The addon** (`ClaudeWoW`), which runs inside the game.
+- **The bridge** (`claude-wow`), a small program on the same computer. It reads your messages from the game, runs your agent, and writes the replies back. The addon cannot do anything without it.
+
+You also need one agent CLI, installed and logged in on that computer. For Claude Code, `claude --version` must work and you must have logged in once by running `claude`. The other agents are listed under [Requirements](#requirements).
+
+### 1. Get the addon
+
+- **With an addon manager (CurseForge app, WoWUp):** search for the addon and install it for World of Warcraft Classic (Classic Era) or World of Warcraft: Forever. The listing goes up with the first release.
+- **Without a manager:** you can skip this step. `claude-wow setup` (step 3) copies the addon that ships inside the bridge into `Interface/AddOns/ClaudeWoW`. To install it by hand instead, download the addon zip (its name starts with `ClaudeWoW`) from the project's GitHub release and unzip it into `Interface/AddOns`, so that `Interface/AddOns/ClaudeWoW/ClaudeWoW.toc` exists.
+
+Setup always writes its own copy of the addon into `Interface/AddOns/ClaudeWoW`. When the addon manager and the bridge have the same version, the files are the same. When they differ, the addon says once which side is older; update that side (see [Troubleshooting](#troubleshooting)).
+
+### 2. Install the bridge (one command)
 
 macOS and Linux:
 
@@ -78,19 +80,86 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/rdimascio/claude-wow/main/install.ps1 | iex
 ```
 
-The installer downloads the `claude-wow` binary for your machine into `~/.local/bin` (Windows: `%LocalAppData%\Programs\claude-wow\bin`, on your user PATH), checks it against the release's checksums, runs the game-side setup (addon into `Interface/AddOns/ClaudeWoW`, `~/.claude-wow/config.json`, the slot pool: ≈15,000 tiny files, which is normal since the client only discovers addon files at launch), and offers to run the bridge in the background from now on. It never uses sudo, is safe to re-run (that is how you update), and stops with a message saying what to do if anything is missing. Pass `--wow "<client folder>"` if setup cannot find the client and `--project <folder>` for the default folder the agents work in (after `sh -s --`; on Windows through `$env:CLAUDE_WOW_WOW` and `$env:CLAUDE_WOW_PROJECT`). Where there is no binary for your machine (another platform, or no release yet), or with `--from-source` (`$env:CLAUDE_WOW_SOURCE = "1"`), it installs the source into `~/.claude-wow/app` (Windows: `%LocalAppData%\Programs\claude-wow`) and runs it with Node.js 22.2+, which it then checks for.
+macOS with Homebrew:
 
-Then **fully quit and relaunch WoW**, enable *Claude WoW* on the AddOns screen, and:
+```sh
+brew tap rdimascio/claude-wow
+brew install claude-wow
+```
+
+Until the first stable release fills in the formula's checksums, only `brew install --HEAD claude-wow` works (it builds from the checkout and runs with Homebrew's node).
+
+The one-line installers download from the latest stable release (`releases/latest`), and GitHub skips prereleases there. To test a beta, name the release: `sh -s -- --release v0.5.0-beta.1` after the `curl` command on macOS and Linux, or `$env:CLAUDE_WOW_RELEASE = "v0.5.0-beta.1"` before the PowerShell command.
+
+The installer downloads the `claude-wow` binary for your computer (macOS arm64 and x64, Linux x64, Windows x64), checks it against the release's `SHA256SUMS`, runs setup for you, and asks whether to run the bridge in the background. When there is no binary for your computer (another platform, or no release yet), it installs from source instead, and that needs Node.js 22.2 or newer. It never uses sudo, and you run it again to update. Homebrew installs only the binary: it cannot write into the game folder, so you must run step 3 yourself.
+
+### 3. Point it at your game
+
+```sh
+claude-wow setup --wow "<client folder>"
+```
+
+The installer has already run setup once. Run it again with `--wow` when the installer could not find the game, when it picked the wrong game, or after a Homebrew install. If the bridge is already running as a service, run `claude-wow service restart` after setup: the bridge reads `config.json` only when it starts. The client folder is the one that holds the game for one version:
+
+| Game | macOS | Windows |
+|---|---|---|
+| Classic Era | `/Applications/World of Warcraft/_classic_era_` | `C:\Program Files (x86)\World of Warcraft\_classic_era_` |
+| Forever | `/Applications/World of Warcraft/_classic_beta_` or `/Applications/World of Warcraft/_forever_` | `C:\Program Files (x86)\World of Warcraft\_classic_beta_` or `...\_forever_` |
+
+On Linux the game is inside your Wine prefix; see [docs/INSTALL-LINUX.md](docs/INSTALL-LINUX.md).
+
+Without `--wow`, setup looks for `_classic_beta_`, then `_forever_`, then `_classic_era_`, and uses the first one it finds. **If you play Classic Era and also have Forever installed, pass `--wow`.** Log in to the game once before setup: setup reads your account folder under `WTF/Account`. Setup copies the addon, writes `~/.claude-wow/config.json`, and creates the 200 reply-slot addons and about 16,400 small signal files. That count is normal. It is safe to run setup again; it keeps your config and chats.
+
+Optional: fetch the game data that lets the agent check item, quest and zone IDs. Run `claude-wow data sync --flavor classic_era` for Classic Era, or `claude-wow data sync` for Forever.
+
+### 4. Quit and start the game once
+
+**Fully quit World of Warcraft and start it again.** A `/reload` is not enough the first time: the game builds its addon list when it starts, and setup has just made new addon folders (`ClaudeWoW_Runtime` and the slot folders). On the character-select screen, open **AddOns** and enable *Claude WoW*. Leave the *Claude WoW slot* entries enabled.
+
+### 5. Start the bridge and say hello
+
+If you said yes to the background service in step 2, the bridge is already running: check it with `claude-wow service status` and skip to the next paragraph. Only one bridge can run at a time, so do not start a second one in a terminal. Otherwise pick one:
 
 ```
-claude-wow                    # the bridge in this terminal; Ctrl+C stops it, it restarts itself after a crash
+claude-wow                    # the bridge in this terminal; Ctrl+C stops it
 claude-wow service install    # or: in the background, now and at every login
-claude-wow service status     # running? pid, uptime, last log lines   (also: logs, stop, start, restart, uninstall)
+claude-wow service status     # is it running? pid, uptime, versions, last log lines
 ```
 
-In game: `/claude hello`. The bridge's banner lists every agent with where its executable was found, or what to install.
+In game, type `/claude hello`. This starts a new chat and sends "hello" to your agent; the reply comes back as a whisper in a **Claude** tab in the chat dock. The default agent is Claude Code. If you have only Codex (or another agent), type `/claude --agent codex hello` instead, or set `agent` in `~/.claude-wow/config.json` and restart the bridge. Bare `/claude` in the normal game chat opens the window; in a chat's own tab it starts a new chat. The bridge's start-up banner lists each agent CLI it found, and what to install for the ones it did not find.
 
-Other routes: `brew tap rdimascio/claude-wow && brew install claude-wow` (the binary; `--HEAD` for the checkout with Homebrew's node) then `claude-wow setup` (Homebrew cannot install the addon; see [docs/INSTALL.md](docs/INSTALL.md#route-2-homebrew-macos)), or `git clone` and `node setup.js` then `npm start` by hand (Node 22.2+ or Bun). Platform notes: [docs/INSTALL-WINDOWS.md](docs/INSTALL-WINDOWS.md), [docs/INSTALL-LINUX.md](docs/INSTALL-LINUX.md), and the macOS section below.
+### Updating
+
+- **Addon:** your addon manager updates it. Without a manager, `claude-wow setup --wow "<client folder>"` installs the addon that ships with the bridge. Always repeat `--wow`: without it, setup searches again and picks `_classic_beta_` first, even if you play Classic Era.
+- **Bridge:** run the installer again, or `brew upgrade claude-wow`. Then run `claude-wow service restart` (or restart the bridge in its terminal).
+- **In game:** if the update made a new addon folder, quit and start the game again. Otherwise `/reload` is usually enough. If setup or the addon asks for a full restart, do that.
+
+### Other ways to install, and installing for development
+
+[docs/INSTALL.md](docs/INSTALL.md) has every route in detail: all the installer options (`--project`, `--service`, `--from-source`, `--release`), Homebrew `--HEAD`, the background service on each platform, and uninstalling. To run from a git checkout:
+
+```sh
+git clone https://github.com/rdimascio/claude-wow
+cd claude-wow
+node setup.js --wow "<client folder>"
+npm start
+```
+
+This needs Node.js 22.2 or newer, or Bun. Platform notes: [docs/INSTALL-WINDOWS.md](docs/INSTALL-WINDOWS.md), [docs/INSTALL-LINUX.md](docs/INSTALL-LINUX.md), and the macOS section below. For tests and conventions, see [Development](#development) and [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Requirements
+
+- Windows (NTFS), or Linux with the game under Wine (see [docs/INSTALL-LINUX.md](docs/INSTALL-LINUX.md)), or macOS with a native client. python3 only if you use the deprecated pixel-capture fallback off Windows; the default screenshot transport needs nothing
+- World of Warcraft: Forever (tested on 1.60.1.69913 and 1.60.1.69977, TOC 16001) or World of Warcraft Classic Era (1.15.9.70003, TOC 11509), **windowed or borderless** (exclusive fullscreen blocks screen capture). Game data for reference tokens is synced per game: `claude-wow data sync` for Forever, `claude-wow data sync --flavor classic_era` for Classic Era; the bridge uses the one that matches the client
+- Nothing else for the installer and the Homebrew route: the bridge ships as one self-contained binary (macOS arm64 and x64, Linux x64, Windows x64). From a checkout it runs on [Node.js](https://nodejs.org) 22.2 or newer, or on [Bun](https://bun.sh)
+- At least one agent CLI, installed and logged in:
+  - [Claude Code](https://claude.com/claude-code): `claude --version` works, and you ran `claude` once to log in
+  - [Codex](https://developers.openai.com/codex): `npm install -g @openai/codex`, then `codex` once to log in
+  - [Grok Build](https://docs.x.ai/build/overview): `irm https://x.ai/cli/install.ps1 | iex`, then `grok login`
+  - Antigravity (`agy`): install Google's Antigravity CLI, then run `agy` once to log in
+  - Hermes Agent (`hermes`): install it, then run `hermes setup` once
+
+## Platform notes
 
 ### macOS (native client)
 
@@ -339,6 +408,16 @@ The keys you are most likely to touch. Every key, flag and environment variable 
 
 ## Troubleshooting
 
+### Install and update problems
+
+- **Battle.net says the game is not playable: "Permissions check failure (2113)" (macOS, Linux).** Battle.net checks the file modes in the game folder. The game installs every file and folder as `0777`, and a file with another mode (for example `0644`) under `Interface/AddOns` makes the check fail. Run `claude-wow setup --wow "<client folder>"` again: it sets every file and folder under `ClaudeWoW`, `ClaudeWoW_Runtime` and `ClaudeWoW_S001` … `ClaudeWoW_S200` to `0777` and prints how many it changed (`permissions: N of M file(s) and folder(s) ...`). The bridge writes its own files as `0777` already. Other addon folders are not changed; if the error stays, look for another addon whose files are not `0777`. From a checkout, `npm run doctor` warns about a file that is not world-writable.
+- **The addon is not in the AddOns list, or `/claude diag` says `no presence file existed when the game started: run setup, then restart WoW`.** The game builds its addon list when it starts. A new addon folder (the first install, `ClaudeWoW_Runtime`, the slot folders) appears only after you fully quit and start the game again; `/reload` does not add a folder. On Classic Era 1.15.9, `/reload` does load changed Lua files, new Lua files and a changed `.toc` (new file entries, a new `## Version`) in a folder the game already knows; this is not yet checked on Forever. If setup or the addon says to restart, quit and start the game.
+- **"This addon (…) is too old for the bridge (…)" or "The bridge (…) is too old for this addon (…)".** The addon and the bridge speak different protocol versions, so the bridge refuses every message until you update the side that the message names. The full text says how: update the addon in the CurseForge app or run `claude-wow setup --wow "<client folder>"`; for the bridge, run `brew upgrade claude-wow` or the installer again, then `claude-wow service restart`. Then reload or restart the game as the message says.
+- **"This addon (…) is older than the bridge (…). They still work together; update the addon when you can."** Only the release numbers differ. Nothing is refused, and the addon says it once per session. The reverse message names the bridge. `/claude diag` and `claude-wow service status` show both versions.
+- **Classic Era: progress and replies arrive in steps, not at once.** On Classic Era a signal file that the bridge deletes still reads as present in the game, so the instant signals (the ack, "reply ready" and the 30-second heartbeat) do not work. The addon gets the ack, the progress text and the reply from its scheduled slot reads instead: 5, 10, 16, 24, 34, 46 and 60 s after you send, then further apart (every 60 s after 5 minutes). The action count comes only from the heartbeat files the bridge deletes, so on Classic Era the progress line shows the elapsed time and the agent's current step, but no action count. The bridge's ack reaches the game at the first read (about 5 s), the progress text changes at each read, and a reply can appear up to a minute after the agent finished on a long run. `/claude diag` shows `presence: slot polls only (self-test failed: …)`. This is expected and nothing is broken; the status light then allows 12 minutes without news before it turns yellow.
+
+### Connection and replies
+
 - **Connect says "No answer from the bridge" / light stays red** — is the bridge running (`claude-wow service status`, or the terminal it runs in)? Is the game window on screen and not minimized? Exclusive fullscreen blocks capture. `bridge.log` shows `strip #N` when a message is decoded and `strip seen but rejected: ...` when one is misread.
 - **Linux: `bridge.log` keeps saying `waiting for WowB window`** — the game isn't running or its window has another name: set `capture.processName` to the exe name, or `capture.windowName` to part of the window title. On Wayland the capture can't see other windows; use an X11 session.
 - **Linux: `npm run probe` shows a black or stale picture** — the compositor is letting the game present on its own. Try `"keepComposited": true` under `capture`, then windowed mode, then `nvidia-settings -a AllowFlipping=0` on NVIDIA; `/claude config mode reload` works without any capture.
@@ -346,7 +425,7 @@ The keys you are most likely to touch. Every key, flag and environment variable 
 - **The reply says "X is not installed on the bridge PC"** — the bridge's banner shows where it looked for each agent. Install the CLI, or put the full path of its executable in `agents.<id>.path` in `~/.claude-wow/config.json` and restart the bridge.
 - **A reply says the agent is not logged in, or asks for a login** — run the CLI once by hand on the bridge PC (`claude`, `codex`, or `grok login`) and log in; the bridge reuses that.
 - **Reply never appears but `bridge.log` says `done`** — `/claude slots`; if the pool is empty, `/claude reload` frees it and picks the reply up via the fallback path.
-- **"Reply slots not installed"** — `node bridge/install-slots.js`, then restart WoW.
+- **"Reply slots not installed (run install-slots.js, restart WoW)"** or **"Reply slots do not load (…)"** — run `claude-wow setup --wow "<client folder>"` (or `claude-wow install-slots` for the slots alone; from a checkout, `node bridge/install-slots.js`), then fully quit and start WoW: the slot folders are new addon folders.
 - **Chats vanished after a reload** — the beta client sometimes wipes addon saved data. The bridge keeps `transcripts.json` and sends your chats back automatically on the next message.
 - **`/claude diag` says the sound channel is unusable** — the cheap readiness checks and heartbeat are off; everything still works through slot polls, just with coarser progress. If it says a valid file reports as unplayable, WoW hasn't been restarted since the files were created.
 
