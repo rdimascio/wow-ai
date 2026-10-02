@@ -12,38 +12,68 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   version:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: package.json, the toc and the tag name one version
+        with:
+          persist-credentials: false
+      - name: package.json, the toc, the addon's Version.SEMVER and the tag name one version
         run: |
           pkg=$(node -p "require('./package.json').version")
           toc=$(sed -n 's/^## Version: *//p' addon/ClaudeWoW/ClaudeWoW.toc | tr -d '\r')
-          echo "package.json $pkg, ClaudeWoW.toc $toc"
+          lua=$(sed -n 's/^ClaudeWoW\.Version = {.*SEMVER = "\([^"]*\)".*/\1/p' addon/ClaudeWoW/ClaudeWoW.lua)
+          echo "package.json $pkg, ClaudeWoW.toc $toc, ClaudeWoW.lua Version.SEMVER $lua"
           test "$pkg" = "$toc"
+          test "$pkg" = "$lua"
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             echo "tag $GITHUB_REF_NAME"
             test "$GITHUB_REF_NAME" = "v$pkg"
           fi
+      - name: a tag push has a CHANGELOG heading for its version and a CurseForge project ID
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          HAS_CF_API_TOKEN: ${{ secrets.CF_API_TOKEN != '' }}
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          status=0
+          if ! sed -n 's/^## \[\([^]]*\)\].*/\1/p' CHANGELOG.md | grep -Fxq "$pkg"; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md has no '## [$pkg]' heading. Rename [Unreleased] to [$pkg] - <date>, add the compare links, and tag again."
+            status=1
+          fi
+          if ! grep -Eq '^## X-Curse-Project-ID: *[0-9]+' addon/ClaudeWoW/ClaudeWoW.toc; then
+            echo "::error file=addon/ClaudeWoW/ClaudeWoW.toc::ClaudeWoW.toc has no '## X-Curse-Project-ID: <id>' line, so the packager would skip CurseForge and the run would still pass. Add the project ID and tag again."
+            status=1
+          fi
+          if [ "$HAS_CF_API_TOKEN" != true ]; then
+            echo "::error::The CF_API_TOKEN secret is not set, so the packager would skip CurseForge. Add it in the repository settings and tag again."
+            status=1
+          fi
+          if ! grep -Eq '^## X-Wago-ID: *[A-Za-z0-9]+' addon/ClaudeWoW/ClaudeWoW.toc; then
+            echo "::warning file=addon/ClaudeWoW/ClaudeWoW.toc::ClaudeWoW.toc has no '## X-Wago-ID' line; this release does not go to Wago."
+          fi
+          exit "$status"
 
   addon:
     needs: version
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: BigWigsMods/packager@v2
         with:
-          args: ${{ github.ref_type == 'tag' && '' || '-d' }}
+          args: ${{ !(github.event_name == 'push' && github.ref_type == 'tag') && '-d' || '' }}
         env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
-          GITHUB_OAUTH: ${{ github.ref_type == 'tag' && secrets.GITHUB_TOKEN || '' }}
+          CF_API_TOKEN: ${{ github.event_name == 'push' && github.ref_type == 'tag' && secrets.CF_API_TOKEN || '' }}
+          WAGO_API_TOKEN: ${{ github.event_name == 'push' && github.ref_type == 'tag' && secrets.WAGO_API_TOKEN || '' }}
+          GITHUB_OAUTH: ${{ github.event_name == 'push' && github.ref_type == 'tag' && secrets.GITHUB_TOKEN || '' }}
       - name: the zip holds only the ClaudeWoW folder, with its toc
         run: |
           zip=$(ls .release/*.zip)
@@ -55,18 +85,48 @@ jobs:
         with:
           name: addon-zip
           path: .release/*.zip
+          include-hidden-files: true
+          if-no-files-found: error
 
   bridge:
     needs: addon
-    if: github.ref_type == 'tag'
+    if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
       - run: bun build.js
       - run: ./dist/claude-wow-linux-x64 service help
-      - run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+      - name: SHA256SUMS lists the four binaries and every sum matches
+        working-directory: dist
+        run: |
+          cat SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 4
+          sha256sum --check --strict SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-wow-binaries
+          path: dist/
+          if-no-files-found: error
+
+  release-binaries:
+    needs: [addon, bridge]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: claude-wow-binaries
+          path: dist
+      - name: the downloaded binaries still match SHA256SUMS
+        working-directory: dist
+        run: sha256sum --check --strict SHA256SUMS
+      - run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

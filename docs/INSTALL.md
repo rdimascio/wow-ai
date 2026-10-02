@@ -39,6 +39,8 @@ Options go after `sh -s --` (macOS/Linux) or in the environment before `iex` (Wi
 | Which release's binary | `--release <tag>` | `$env:CLAUDE_WOW_RELEASE = "<tag>"` |
 | Where the source goes (from source) | `--dir <folder>` | `$env:CLAUDE_WOW_DIR = "<folder>"` |
 
+Without a release option the script takes the latest stable release. When that has no binary for your machine (for example, only pre-releases such as `v0.5.0-beta.1` exist so far), it takes the newest release of any kind, pre-releases included, and checks it against that release's `SHA256SUMS` the same way. To install one exact release, beta or not, name its tag: `--release v0.5.0-beta.1` (Windows: `$env:CLAUDE_WOW_RELEASE = "v0.5.0-beta.1"`). A named tag never falls back to another release.
+
 For example:
 
 ```sh

@@ -8,7 +8,7 @@
 #   $env:CLAUDE_WOW_PROJECT = "C:\code\my-game"                          # the default folder the agents work in
 #   $env:CLAUDE_WOW_SERVICE = "yes"  (or "no")                           # start at login without asking (or never ask)
 #   $env:CLAUDE_WOW_SOURCE = "1"     no prebuilt binary: clone the repo and run it with Node.js 22.2+
-#   $env:CLAUDE_WOW_RELEASE = "..."  which release's binary (default latest)
+#   $env:CLAUDE_WOW_RELEASE = "..."  which release's binary (default latest, then the newest pre-release)
 #   $env:CLAUDE_WOW_DIR = "..."      where it goes, default $env:LOCALAPPDATA\Programs\claude-wow
 #   $env:CLAUDE_WOW_REF = "..."      which version of the source, from source (default main)
 #
@@ -70,6 +70,15 @@ function Test-NodeVersion([string]$v) {
   try { return ([version]($v -replace '^v', '')) -ge $MinNode } catch { return $false }
 }
 
+function Get-NewestReleaseTag {
+  if ($Repo -notmatch '^https://github\.com/(.+)$') { return $null }
+  try {
+    $releases = @(Invoke-RestMethod -UseBasicParsing -Headers @{ Accept = 'application/vnd.github+json' } "https://api.github.com/repos/$($Matches[1])/releases?per_page=1")
+    if ($releases.Count -and $releases[0].tag_name) { return [string]$releases[0].tag_name }
+  } catch {}
+  return $null
+}
+
 $binDir = Join-Path $Dir 'bin'
 New-Item -ItemType Directory -Force $binDir | Out-Null
 $exe = Join-Path $binDir 'claude-wow.exe'
@@ -88,7 +97,14 @@ function Get-Binary {
   $tmp = Join-Path $env:TEMP "claude-wow-$PID.exe"
   Write-Host "downloading $base/$asset"
   try { Invoke-WebRequest -UseBasicParsing "$base/$asset" -OutFile $tmp }
-  catch { Write-Host "no binary at $base/$asset (no release for it yet, or no network)"; return $false }
+  catch {
+    $newest = if ($Release -eq 'latest') { Get-NewestReleaseTag } else { $null }
+    if (-not $newest) { Write-Host "no binary at $base/$asset (no release for it yet, or no network)"; return $false }
+    $base = "$Repo/releases/download/$newest"
+    Write-Host "the latest stable release has no $asset; trying the newest release, ${newest}: $base/$asset"
+    try { Invoke-WebRequest -UseBasicParsing "$base/$asset" -OutFile $tmp }
+    catch { Write-Host "no binary at $base/$asset (no release for it yet, or no network)"; return $false }
+  }
   $sums = $null
   try { $sums = (Invoke-WebRequest -UseBasicParsing "$base/SHA256SUMS").Content } catch {}
   if ($sums) {

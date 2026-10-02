@@ -12,7 +12,7 @@
 #   --service           install the background service without asking
 #   --no-service        don't install or ask
 #   --from-source       no prebuilt binary: clone the repo and run it with Node.js 22.2+ (or CLAUDE_WOW_SOURCE=1)
-#   --release <tag>     which release's binary (default latest; or CLAUDE_WOW_RELEASE)
+#   --release <tag>     which release's binary (default latest, then the newest pre-release; or CLAUDE_WOW_RELEASE)
 #   --dir <folder>      where the source goes, from source (default ~/.claude-wow/app; or CLAUDE_WOW_DIR)
 #   --ref <branch|tag>  which version of the source, from source (default main; or CLAUDE_WOW_REF)
 #
@@ -86,6 +86,20 @@ release_base() {
   if [ "$RELEASE" = latest ]; then echo "$REPO_URL/releases/latest/download"; else echo "$REPO_URL/releases/download/$RELEASE"; fi
 }
 
+first_tag_name() {
+  sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+newest_release_tag() {
+  case "$REPO_URL" in
+    https://github.com/*) api_url="https://api.github.com/repos/${REPO_URL#https://github.com/}/releases?per_page=1" ;;
+    *) return 1 ;;
+  esac
+  newest=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api_url" 2>/dev/null | first_tag_name)
+  [ -n "$newest" ] || return 1
+  echo "$newest"
+}
+
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
   elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
@@ -129,9 +143,17 @@ get_binary() {
   tmp=$(mktemp -d 2>/dev/null || mktemp -d -t claude-wow)
   say "downloading $base/$asset"
   if ! curl -fsSL "$base/$asset" -o "$tmp/$asset" 2>/dev/null; then
-    rm -rf "$tmp"
-    say "no binary at $base/$asset (no release for it yet, or no network)"
-    return 1
+    newest=
+    if [ "$RELEASE" = latest ]; then newest=$(newest_release_tag || true); fi
+    if [ -n "$newest" ]; then
+      base="$REPO_URL/releases/download/$newest"
+      say "the latest stable release has no $asset; trying the newest release, $newest: $base/$asset"
+    fi
+    if [ -z "$newest" ] || ! curl -fsSL "$base/$asset" -o "$tmp/$asset" 2>/dev/null; then
+      rm -rf "$tmp"
+      say "no binary at $base/$asset (no release for it yet, or no network)"
+      return 1
+    fi
   fi
   if curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null; then
     want=$(grep "[[:space:]]$asset\$" "$tmp/SHA256SUMS" | cut -d' ' -f1)

@@ -20,7 +20,7 @@
 ### Research findings
 | Topic | Finding |
 |---|---|
-| BigWigs packager | Its `toc_to_type` maps `11???` to classic and **`16???` to forever** (alias `camelot`). A single `## Interface: 11509, 16001` toc then publishes to both flavors. Action: `BigWigsMods/packager@v2` with `CF_API_KEY`, `WAGO_API_TOKEN` and `GITHUB_OAUTH`, triggered by a tag. `-S` splits the toc per flavor. |
+| BigWigs packager | Its `toc_to_type` maps `11???` to classic and **`16???` to forever** (alias `camelot`). A single `## Interface: 11509, 16001` toc then publishes to both flavors: `set_build_version` turns each interface into a game version (`11509` to `1.15.9` of type classic, `16001` to `1.60.1` of type forever), and `upload_curseforge` looks each name up at upload time in `GET /api/game/wow/versions` under game version type 67408 (classic) or 88568 (forever); a name CurseForge does not list yet falls back to a lower one with a warning. Action: `BigWigsMods/packager@v2` with `CF_API_TOKEN`, `WAGO_API_TOKEN` and `GITHUB_OAUTH`, triggered by a tag. `-S` is not needed: it writes a separate toc file per game type (`ClaudeWoW_Vanilla.toc`, `ClaudeWoW_Camelot.toc`), and both clients read the one multi-interface toc. A tag with `beta` in it is a beta file and a prerelease on GitHub. |
 | Multi-folder | `.pkgmeta` `move-folders:` can ship more than one addon folder in one zip. |
 | CurseForge app | Added the "Forever" flavor in app 1.321. An update uninstalls and reinstalls the folder. |
 | Modified files | TSM: CurseForge "sees the file as 'modified'… will try to reinstall the original". RaiderIO: CurseForge "will override" the client's copy. Both tell users to set the addon to Ignored in CurseForge. |
