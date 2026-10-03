@@ -61,6 +61,8 @@ const GD = require('./gamedata');
 const DSYNC = require('./datasync');
 const GR = require('./gamerefs');
 const RT = require('./replytokens');
+const UPD = require('./selfupdate');
+const IDLE = require('./idle');
 
 // The plugins this bridge has (docs/PLATFORM.md). Registration order is the
 // order match() is asked in, and the first one is the default unless
@@ -353,6 +355,7 @@ let lastMtime = 0;
 const running = new Map(); // chatKey -> { job, child }
 const queued = new Map();  // chatKey -> job waiting for that chat (or for a free parallel slot)
 const live = new Map();    // chatKey -> latest record shown to the game
+let lastActivityAt = Date.now();
 let lastPublish = 0;
 let publishTimer = null;
 
@@ -423,7 +426,7 @@ function killTree(child) { PR.killTree(child, { graceMs: KILL_GRACE_MS, log }); 
 // unless it is stopping too. A second signal while that is going changes nothing.
 let shuttingDown = false;
 let captureChild = null; // the capture script on the pixel transport (startCapture)
-function shutdown(sig) {
+function shutdown(sig, exitCode) {
   if (shuttingDown) return;
   shuttingDown = true;
   try { runGrants.revokeAll(); } catch {}
@@ -435,7 +438,7 @@ function shutdown(sig) {
   if (captureChild) kids.push(captureChild);
   const n = kids.filter(PR.alive).length;
   log(`${sig}: stopping${n ? `; ending ${n} child process${n === 1 ? '' : 'es'} (SIGTERM, SIGKILL after ${KILL_GRACE_MS} ms)` : ''}`);
-  PR.killAll(kids, { graceMs: KILL_GRACE_MS, log }, () => voteClosing.then(() => process.exit(sig === 'SIGINT' ? 130 : 143)));
+  PR.killAll(kids, { graceMs: KILL_GRACE_MS, log }, () => voteClosing.then(() => process.exit(exitCode !== undefined ? exitCode : sig === 'SIGINT' ? 130 : 143)));
 }
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -1014,6 +1017,7 @@ function submit(job) {
     return;
   }
   if (inFlight(job)) return;
+  lastActivityAt = Date.now();
   if (holdForDeploy(job)) return;
   dispatchMessage(job);
 }
@@ -1342,6 +1346,7 @@ function checkedReply(job, reply) {
 }
 
 function lateReply(job, raw) {
+  lastActivityAt = Date.now();
   const { text, summary } = checkedReply(job, P.splitSummary(String(raw || '')));
   noteMessage(job, 'assistant', text);
   publish(`${chatKey(job)}#late`, { chat: job.chat, id: job.id, status: 'done', late: true, text, summary, cwd: job.cwd, agent: job.agent || '', plugin: job.plugin || '' }, true);
@@ -1849,6 +1854,7 @@ function finish(job, status, text, session, denied) {
     return;
   }
   job.finished = true;
+  lastActivityAt = Date.now();
   running.delete(chatKey(job));
   if (state.inflight) delete state.inflight[chatKey(job)];
   dropHandling(handlingKey(job));
@@ -2166,6 +2172,33 @@ function banner() {
   console.log('Leave this window open while you play. Ctrl+C to stop.\n');
 }
 
+function bridgeIdleStatus() {
+  const fromState = IDLE.idleStatus(state);
+  if (!fromState.idle) return fromState;
+  if (held.size) return { idle: false, reason: `${held.size} message(s) held for a deploy that is switching releases` };
+  const holder = REL.switchingHolder(DEPLOY_LOCK_FILE);
+  if (holder) return { idle: false, reason: `a deploy (pid ${holder.pid}) is switching releases` };
+  const busy = new Set([...running.keys(), ...queued.keys()]).size;
+  return busy ? { idle: false, reason: `${busy} message(s) running or queued` } : fromState;
+}
+
+function startSelfUpdate() {
+  if (!holdsLock) return;
+  try {
+    UPD.createUpdater({
+      home: HOME.dir,
+      cfg,
+      log,
+      version: BRIDGE_INFO.version,
+      idle: bridgeIdleStatus,
+      lastActivityAt: () => lastActivityAt,
+      gameRunning: () => CL.clientRunning(CL.clientFolder(cfg)),
+      restart: () => shutdown('update', UPD.UPDATE_EXIT_CODE),
+      supervised: process.env.CLAUDE_WOW_SUPERVISED === '1',
+    }).start();
+  } catch (e) { log(`self-update: not started (${e && e.message ? e.message : e})`); }
+}
+
 banner();
 if (!once) startPlugins();
 if (inject !== null) {
@@ -2191,6 +2224,7 @@ if (inject !== null) {
     if (running.size === 0) { console.log('nothing pending'); process.exit(0); }
   } else {
     setInterval(pollSavedVariables, cfg.pollMs || 750);
+    startSelfUpdate();
     migrateRuntime();
     if (Number.isFinite(state.lastId)) clearSignalsAhead(state.lastId);
     preparePresence();

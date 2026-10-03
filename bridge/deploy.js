@@ -9,6 +9,7 @@ const R = require('./runtime');
 const REL = require('./releases');
 const I = require('./idle');
 const SVC = require('./service');
+const UPD = require('./selfupdate');
 
 const DEFAULT_REF = 'origin/main';
 const SUPPORTED_PLATFORMS = ['darwin', 'linux'];
@@ -312,7 +313,7 @@ async function deploy(opts, ctx) {
       ctx.out(`build   : bun build.js --host in ${source.dir}`);
       binaryFile = ctx.build(source.dir, outDir);
     }
-    const meta = { sha: source.sha, version: source.version, from: source.from, dirty: source.dirty };
+    const meta = { source: REL.SOURCE_DEV_DEPLOY, sha: source.sha, version: source.version, from: source.from, dirty: source.dirty };
     const waiter = serviceRunsCurrent(l, ctx) ? switchWaiter(l, ctx, lock, opts.timeoutMs) : null;
     const result = await REL.installAndActivate(l, { name: source.name, binaryFile, meta, keep: opts.keep, now: ctx.now, alive: ctx.alive }, {
       waitIdle: async () => {
@@ -345,7 +346,10 @@ async function rollback(opts, ctx) {
     if (REL.currentName(l) === prev) throw new Error(REL.previousIsCurrentMessage(l, prev));
     if (serviceRunsCurrent(l, ctx)) await switchWaiter(l, ctx, lock, opts.timeoutMs)();
     lock.assertHeld();
-    return afterSwitch(l, ctx, REL.rollback(l));
+    const flip = REL.rollback(l);
+    if (flip.previous) UPD.skipRelease(l, flip.previous, `dev rollback from releases/${flip.previous}`);
+    UPD.clearPendingRestart(l.base, `dev rollback to releases/${flip.name}`);
+    return afterSwitch(l, ctx, flip);
   } finally {
     stopListening();
     cleanup();

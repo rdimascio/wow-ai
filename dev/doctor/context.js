@@ -2,6 +2,7 @@
 const path = require('path');
 const H = require('../../bridge/home');
 const Service = require('../../bridge/service');
+const UPD = require('../../bridge/selfupdate');
 
 const LABEL = Service.LABEL;
 
@@ -54,6 +55,7 @@ function gather(sys) {
   const stateJson = parseJson(sys.readText(homePaths.state));
   const transcriptsJson = parseJson(sys.readText(homePaths.transcripts));
   const pidJson = parseJson(sys.readText(Service.pidFile(serviceDirs)));
+  const updateJson = parseJson(sys.readText(path.join(homePaths.dir, UPD.RECORD_FILE)));
   return {
     sys,
     now: sys.now(),
@@ -69,6 +71,7 @@ function gather(sys) {
     transcriptsJson,
     state: stateJson.value || {},
     pidInfo: pidJson.value,
+    update: updateJson.value,
     serviceLog: Service.serviceLogFile(serviceDirs),
   };
 }

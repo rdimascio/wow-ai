@@ -8,6 +8,7 @@ const { EventEmitter } = require('events');
 const D = require('../bridge/deploy');
 const REL = require('../bridge/releases');
 const S = require('../bridge/service');
+const UPD = require('../bridge/selfupdate');
 
 const NO_SYMLINKS = process.platform === 'win32';
 const UID = 501;
@@ -121,6 +122,8 @@ test('deploy of a ref: built in a temporary worktree that is removed, installed 
   const name = `0.5.0-${sha.slice(0, 12)}`;
   assert.equal(REL.currentName(h.l), name);
   assert.equal(fs.readFileSync(REL.currentBinary(h.l), 'utf8'), 'binary of one');
+  assert.equal(REL.releaseInfo(h.l, name).source, REL.SOURCE_DEV_DEPLOY, 'release.json marks it a dev deploy');
+  assert.equal(REL.isPublishedRelease(h.l, name), false, 'so self-update never treats it as a release');
   assert.equal(h.builds.length, 1);
   assert.ok(h.builds[0].startsWith(root) && !h.builds[0].startsWith(repo), 'built outside the checkout');
   assert.ok(!fs.existsSync(h.builds[0]), 'the temporary worktree is gone');
@@ -156,6 +159,7 @@ test('rollback goes back to the release before the last deploy and kickstarts; a
   assert.equal(REL.previousName(r.l), second);
   assert.deepEqual(r.events[0], KICKSTART);
   assert.ok(!fs.existsSync(r.l.lock));
+  assert.equal(UPD.readSkip(r.l.base), null, 'rolling away from a dev deploy skips no release version');
 
   const s = harness(root, { probe: () => ({ idle: false, reason: '1 agent run(s) in flight (#2)' }) });
   assert.equal(await D.main(['status'], s.ctx), 0);
@@ -165,6 +169,30 @@ test('rollback goes back to the release before the last deploy and kickstarts; a
   assert.match(text, new RegExp(`release  : ${first}  \\(current\\)`));
   assert.match(text, /service  : runs .*current.claude-wow/);
   assert.match(text, /bridge   : busy \(1 agent run\(s\) in flight \(#2\)\)/);
+});
+
+test('rollback away from a published release writes the self-update skip for its version, so the daily check does not reinstall it', { skip: NO_SYMLINKS }, async () => {
+  const root = scratch('rollskip');
+  const h = harness(root);
+  const add = (name, version) => {
+    const file = path.join(root, `bin-${name}`);
+    fs.writeFileSync(file, `binary ${name}`);
+    REL.installRelease(h.l, { name, binaryFile: file, meta: { source: REL.SOURCE_SELF_UPDATE, version } });
+  };
+  add('1.0.0', '1.0.0');
+  add('2.0.0', '2.0.0');
+  REL.activate(h.l, '1.0.0');
+  REL.activate(h.l, '2.0.0');
+  assert.equal(UPD.readSkip(h.l.base), null);
+  UPD.writeRecord(h.l.base, { pendingRestart: true, version: '2.0.0', from: '1.0.0', attemptAt: 1, ok: true });
+  assert.equal(await D.main(['rollback'], h.ctx), 0, h.err.join('\n'));
+  assert.equal(UPD.readRecord(h.l.base).pendingRestart, false, 'the update restart that was waiting for 2.0.0 is called off');
+  assert.match(UPD.readRecord(h.l.base).message, /dev rollback/);
+  assert.equal(REL.currentName(h.l), '1.0.0');
+  const skip = UPD.readSkip(h.l.base);
+  assert.equal(skip && skip.version, '2.0.0');
+  assert.match(skip.reason, /dev rollback from releases\/2\.0\.0/);
+  assert.deepEqual(h.events[0], KICKSTART, 'the restart went through the fake service');
 });
 
 test('before the migration the service does not run current: the release is staged and current flipped, but nothing restarts and setup does not run', { skip: NO_SYMLINKS }, async () => {

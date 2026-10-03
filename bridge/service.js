@@ -28,6 +28,7 @@ const H = require('./home');
 const R = require('./runtime');
 const P = require('./protocol'); // which transport a config starts the bridge on
 const REL = require('./releases');
+const UPD = require('./selfupdate');
 
 const LABEL = 'io.claudewow.bridge';      // launchd label
 const UNIT = 'claude-wow-bridge';         // systemd unit name
@@ -546,6 +547,7 @@ function status(d, platform = process.platform, out = console.log, stateFile = H
     out('  running   : no');
   }
   out(`  versions  : ${P.versionsSummary(readState(stateFile))}; ${P.installedSummary()}`);
+  out(`  update    : ${UPD.statusLine(UPD.readRecord(path.dirname(stateFile)))}`);
   const log = fs.existsSync(serviceLogFile(d)) ? serviceLogFile(d) : H.resolve().log;
   out(`  log       : ${log}  (rotates at 5 MB, 5 kept)`);
   const tail = lastLines(log, 5);

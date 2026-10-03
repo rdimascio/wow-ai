@@ -15,6 +15,10 @@ const UNREADABLE_LOCK_GRACE_MS = 60 * 1000;
 const RELEASE_INFO = 'release.json';
 const PREPARING = 'preparing';
 const SWITCHING = 'switching';
+const SOURCE_DEV_DEPLOY = 'dev-deploy';
+const SOURCE_SELF_UPDATE = 'self-update';
+const SOURCE_RELEASE = 'release';
+const PUBLISHED_SOURCES = [SOURCE_RELEASE, SOURCE_SELF_UPDATE];
 
 function layout(base = H.resolve().dir) {
   return {
@@ -178,6 +182,19 @@ function rollback(l) {
   const was = currentName(l);
   if (was === prev) throw new Error(previousIsCurrentMessage(l, prev));
   return activate(l, prev);
+}
+
+function releaseInfo(l, name) {
+  if (!validName(name)) return null;
+  try {
+    const info = JSON.parse(fs.readFileSync(path.join(releaseDir(l, name), RELEASE_INFO), 'utf8'));
+    return info && typeof info === 'object' && !Array.isArray(info) ? info : null;
+  } catch { return null; }
+}
+
+function isPublishedRelease(l, name) {
+  const info = releaseInfo(l, name);
+  return !!info && PUBLISHED_SOURCES.includes(info.source);
 }
 
 function previousIsCurrentMessage(l, name) {
@@ -369,6 +386,7 @@ function releaseLock(file, token) {
 
 module.exports = {
   BINARY, RELEASES_DIR, KEEP_RELEASES, LOCK_MAX_AGE_MS, RELEASE_INFO, PREPARING, SWITCHING,
+  SOURCE_DEV_DEPLOY, SOURCE_RELEASE, SOURCE_SELF_UPDATE, PUBLISHED_SOURCES, releaseInfo, isPublishedRelease,
   layout, releaseDir, releaseBinary, currentBinary, validName, checkName, isInsideReleases,
   currentName, previousName, hasRelease, releaseComplete, installRelease, pointCurrentAt, activate, rollback, previousIsCurrentMessage,
   listReleases, prune, pruneStaging, pruneReported, installAndActivate,

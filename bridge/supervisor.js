@@ -58,13 +58,19 @@ if (argv[0] === '--version' || argv[0] === '-v') {
   if (code !== null) process.exitCode = code;
 } else if (argv[0] === 'report') {
   process.exitCode = require('./report').main(argv.slice(1));
+} else if (argv[0] === 'update') {
+  require('./selfupdate').main(argv.slice(1)).then((code) => { process.exitCode = code; }, (e) => {
+    process.stderr.write(`claude-wow update failed: ${e && e.message ? e.message : String(e)}\n`);
+    process.exitCode = 1;
+  });
 } else {
-  if (argv.includes('--help') || argv.includes('-h')) console.log('claude-wow setup [...]   game-side install (setup.js)\nclaude-wow service <cmd> background service (install, uninstall, start, stop, restart, status, logs)\nclaude-wow dev <cmd>     releases for a developer machine (deploy [ref|worktree], rollback, status; docs/MIGRATE-PROD-INSTALL.md)\nclaude-wow bridge [...]  the bridge alone in this process, without the restarts\nclaude-wow channel      the live-session channel server Claude Code starts (docs/LIVE-SESSION.md)\nclaude-wow data sync    fetch client tables from wago.tools into the home folder (--flavor forever or classic_era)\nclaude-wow data-mcp     the read-only wowdata MCP server the bridge gives ask runs\nclaude-wow goals-mcp    the per-run wowgoals MCP server the bridge gives ask runs\nclaude-wow events [--follow] [--min N]  game events from the telemetry, one JSON line each\nclaude-wow report [--day [YYYY-MM-DD]]  a day of game events, orders and goal progress, from the goals folder\n');
+  if (argv.includes('--help') || argv.includes('-h')) console.log('claude-wow setup [...]   game-side install (setup.js)\nclaude-wow service <cmd> background service (install, uninstall, start, stop, restart, status, logs)\nclaude-wow update [--check]  install the latest release binary now (the bridge also checks once a day)\nclaude-wow dev <cmd>    releases for a developer machine (deploy [ref|worktree], rollback, status; docs/MIGRATE-PROD-INSTALL.md)\nclaude-wow bridge [...]  the bridge alone in this process, without the restarts\nclaude-wow channel      the live-session channel server Claude Code starts (docs/LIVE-SESSION.md)\nclaude-wow data sync    fetch client tables from wago.tools into the home folder (--flavor forever or classic_era)\nclaude-wow data-mcp     the read-only wowdata MCP server the bridge gives ask runs\nclaude-wow goals-mcp    the per-run wowgoals MCP server the bridge gives ask runs\nclaude-wow events [--follow] [--min N]  game events from the telemetry, one JSON line each\nclaude-wow report [--day [YYYY-MM-DD]]  a day of game events, orders and goal progress, from the goals folder\n');
   supervise();
 }
 
 function supervise() {
   const svc = require('./service');
+  const UPD = require('./selfupdate');
   const SERVICE = process.env.CLAUDE_WOW_SERVICE === '1';
   const dirs = svc.dirs();
   const out = SERVICE ? new svc.RotatingLog(svc.serviceLogFile(dirs)) : null;
@@ -76,8 +82,10 @@ function supervise() {
 
   function start() {
     svc.rotate(BRIDGE_LOG);
-    child = spawn(...R.scriptCommand('bridge', argv), {
+    const runtime = { ...R.DEFAULT, execPath: UPD.launchPath() };
+    child = spawn(...R.scriptCommand('bridge', argv, runtime), {
       stdio: SERVICE ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      env: { ...process.env, CLAUDE_WOW_SUPERVISED: '1' },
     });
     if (SERVICE) {
       child.stdout.on('data', d => out.write(d));
@@ -93,6 +101,11 @@ function supervise() {
         return;
       }
       if (code === 2 || code === 3 || code === 0) { svc.clearPid(dirs); process.exit(code); }
+      if (code === UPD.UPDATE_EXIT_CODE) {
+        say(`\nbridge stopped for an update; starting ${UPD.launchPath()} again`);
+        setImmediate(start);
+        return;
+      }
       say(`\nbridge exited (${code}); restarting in 3 s`);
       setTimeout(start, 3000);
     });
