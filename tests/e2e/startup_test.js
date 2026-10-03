@@ -67,7 +67,7 @@ test('a reload-mode session that never says hello is judged from its outbox and 
     h.client.slash('/claude config mode reload');
     h.client.send('through the outbox');
     await h.bridge.waitForLine(/refused: The bridge/, { timeoutMs: 30000 });
-    const rec = Object.values(h.state().addons || {})[0];
+    const rec = await h.client.waitFor(() => Object.values(h.state().addons || {})[0], { timeoutMs: 5000, label: 'the addon versions in state.json' });
     assert.equal(rec.proto, P.PROTO + 1);
     assert.equal(rec.verdict, 'update-bridge');
     assert.equal(h.agentCalls().length, 0, 'the message never reached an agent');
