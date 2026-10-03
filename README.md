@@ -47,6 +47,7 @@ The bridge drives whichever of these you have installed; each chat can use a dif
 | **Grok Build** (`grok`) | `grok --prompt-file … --output-format streaming-json`, resumed with `-r` | `permissionMode` + the same `allowedTools` rules, translated to Grok's globs | yes, when Grok reports a refused tool |
 | **Antigravity** (`agy`) | `agy -p=<prompt> --output-format stream-json`, resumed with `--conversation` | Antigravity permission switches | no |
 | **Hermes** (`hermes`) | `hermes chat --query-file -`, resumed with `--resume` | default only; the bridge never uses `--yolo` | no |
+| **Local** (`local`) | the bridge's own `bridge/localagent.js`, which calls an OpenAI-compatible server such as `llama-server` on your PC; costs nothing | no file or shell tools; ask chats get the read-only `wowdata` tools | no |
 
 `agent` in `~/.claude-wow/config.json` is the default (`claude`). `/claude -c --agent codex` switches the current chat, or right-click a chat in the left panel and pick **Agent...**; the reply bubbles and the game-chat echo are labelled with whoever answered. A session belongs to the agent that made it, so a chat that changes agent starts a fresh session there (its transcript stays). Install notes, the exact command lines, what each permission mode means per agent, and known limits are in [docs/AGENTS.md](docs/AGENTS.md).
 
@@ -136,7 +137,7 @@ Right-clicking a chat in the left panel opens a small menu with **Rename...**, *
 | `/claude --effort <level> [text]` | `claude --effort` | `low`, `medium`, `high`, `xhigh` or `max` |
 | `/claude --permission-mode <mode> [text]` | `claude --permission-mode` | `acceptEdits`, `auto`, `plan`, `manual`, `dontAsk` or `bypassPermissions` |
 | `/claude --add-dir <path> [text]` | `claude --add-dir` | one more folder the agent may use; repeat it for more |
-| `/claude --agent <name> [text]` | | which CLI runs the chat: `claude`, `codex`, `grok`, `agy` or `hermes`. A chat that changes agent starts a fresh session with it |
+| `/claude --agent <name> [text]` | | which CLI runs the chat: `claude`, `codex`, `grok`, `agy`, `hermes` or `local` (a model on your own PC, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md#the-local-agent)). A chat that changes agent starts a fresh session with it |
 | `/claude config [key] [value]` | `claude config` | the addon's settings (below); alone it lists them with their values |
 
 Flags come before the text and combine: `/claude --model opus fix the build` starts a new chat on Opus with that message, and `/claude -c --effort high` changes the current chat. `--flag=value` and `"quoted values"` work, a value of `-` (or `default`) clears a setting, and a flag with no value shows it. The settings stay with the chat and go to the agent on every message; each agent gets them in its own spelling (Codex `-m`, `-c model_reasoning_effort=`, `--add-dir`; Grok `-m`), and when an agent has no such option the reply says so and the run goes on without it. A message that starts with something that only looks like a flag (`/claude --verbose output is too long, why?`) is a message.
@@ -322,7 +323,7 @@ The keys you are most likely to touch. Every key, flag and environment variable 
 | Key | Meaning |
 |---|---|
 | `defaultCwd` | folder for chats that haven't been given one with `/claude cd` |
-| `agent` | the agent for chats that haven't picked one with `/claude -c --agent` (`claude`, `codex`, `grok`, `agy` or `hermes`) |
+| `agent` | the agent for chats that haven't picked one with `/claude -c --agent` (`claude`, `codex`, `grok`, `agy`, `hermes` or `local`) |
 | `claudeDir`, `claudeSessions` | where Claude Code keeps its sessions for `/claude -r` (default `$CLAUDE_CONFIG_DIR`, else `~/.claude`), and `false` to list only the bridge's own chats and the running sessions |
 | `agents.<id>.permissionMode`, `.allowedTools`, `.deniedTools`, `.model` | that agent's permissions, allowlist, denylist and model; `.path` where its executable is if the bridge can't find it, `.extraArgs` anything else to pass it |
 | `agents.codex.networkAccess` | let Codex's sandbox reach the network (default `false`) |

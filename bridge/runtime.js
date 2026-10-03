@@ -38,6 +38,7 @@ const SCRIPTS = {
   'install-slots': 'bridge/install-slots.js',
   'data-mcp': 'bridge/datamcp.js',
   'goals-mcp': 'bridge/goalsmcp.js',
+  'local-agent': 'bridge/localagent.js',
 };
 
 // [file, args]: what to spawn to run one of this project's scripts. From a

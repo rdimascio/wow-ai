@@ -219,6 +219,23 @@ function claudeParser(opts = {}) {
   };
 }
 
+const LOCAL_DEFAULTS = require('./localagent').DEFAULTS;
+
+function localParser(opts = {}) {
+  const inner = claudeParser(opts);
+  return {
+    feed(ev) {
+      const out = inner.feed(ev);
+      if (ev.type === 'result' && out.usage) {
+        delete out.usage.costUnknown;
+        delete out.usage.costIsSessionTotal;
+        out.usage.cost = 0;
+      }
+      return out;
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Codex
 // ---------------------------------------------------------------------------
@@ -656,6 +673,32 @@ const AGENTS = {
     },
     env: env => env, parser: hermesParser,
   },
+  local: {
+    name: 'Local', command: 'local-agent',
+    settings: ['model'],
+    install: 'start an OpenAI-compatible server such as llama-server (docs/CONFIGURATION.md) and set agents.local.baseUrl',
+    windowsPaths: () => [], posixPaths: () => [],
+    mcp: true,
+    resolve: () => {
+      const [file, args] = R.scriptCommand('local-agent');
+      const script = args.find(a => /\.js$/.test(a));
+      return { file, args, found: script ? exists(script) : true };
+    },
+    args({ cfg, resume, mcpConfig }) {
+      const a = ['--base-url', String(cfg.baseUrl || LOCAL_DEFAULTS.baseUrl), '--model', String(cfg.model || LOCAL_DEFAULTS.model)];
+      const timeout = Number(cfg.timeoutMs);
+      a.push('--timeout-ms', String(Number.isSafeInteger(timeout) && timeout > 0 ? timeout : LOCAL_DEFAULTS.timeoutMs));
+      if (mcpConfig) a.push('--mcp-config', mcpConfig);
+      if (resume) a.push('--resume', resume);
+      return a;
+    },
+    input: ({ prompt, system, images }) => {
+      const note = imagePaths(images).length ? 'The local agent cannot see images, so your screenshot was not sent to it.' : '';
+      return { stdin: JSON.stringify({ system: system || '', prompt }), note };
+    },
+    env: env => env,
+    parser: localParser,
+  },
 };
 
 const DEFAULT_AGENT = 'claude';
@@ -795,6 +838,7 @@ function nativeNextTo(script, agent) {
 function resolveCommand(id, cfg = {}) {
   const A = AGENTS[id];
   if (!A) return { file: id, args: [], found: false, note: `unknown agent "${id}"` };
+  if (typeof A.resolve === 'function') return A.resolve(cfg);
   if (cfg.path) {
     if (/\.(cmd|bat)$/i.test(cfg.path)) {
       const r = unwrapShim(cfg.path, A);
@@ -828,6 +872,6 @@ function resolveCommand(id, cfg = {}) {
 module.exports = {
   AGENTS, DEFAULT_AGENT, SETTING_FLAGS, READ_ONLY_MODES, unsupportedSettings, withChatSettings, withPluginSettings, PLUGIN_SETTINGS, addDirs, agentIds, normalizeAgent, displayName, agentConfig,
   grokRules, snippet, contextBlock, imagePaths, IMAGE_CAPTION,
-  claudeParser, codexParser, grokParser, agyParser, hermesParser, codexItemLine, grokCall, grokRefusal, shellInner, claudeUsage, claudeWindow, claudeCost, claudeRate, CLAUDE_RATES,
+  claudeParser, codexParser, grokParser, agyParser, hermesParser, localParser, LOCAL_DEFAULTS, codexItemLine, grokCall, grokRefusal, shellInner, claudeUsage, claudeWindow, claudeCost, claudeRate, CLAUDE_RATES,
   resolveCommand, unwrapShim, nativeNextTo,
 };

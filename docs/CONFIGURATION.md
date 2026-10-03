@@ -20,7 +20,7 @@ The bridge reads `config.json` once at start. Restart it after editing, except f
 
 | Key | Default | Meaning |
 |---|---|---|
-| `agent` | `"claude"` | The agent for chats that have not picked one with `/claude -c --agent`. One of `claude`, `codex`, `grok`, `agy`, `hermes`; the bridge refuses to start on anything else. |
+| `agent` | `"claude"` | The agent for chats that have not picked one with `/claude -c --agent`. One of `claude`, `codex`, `grok`, `agy`, `hermes`, `local`; the bridge refuses to start on anything else. |
 | `agents.<id>` | one block per agent | That agent's settings, below. A missing block means the defaults. |
 
 Keys under `agents.claude`, `agents.codex`, `agents.grok`, `agents.agy` and `agents.hermes` (what each one means per agent is spelled out in [AGENTS.md](AGENTS.md)):
@@ -34,6 +34,31 @@ Keys under `agents.claude`, `agents.codex`, `agents.grok`, `agents.agy` and `age
 | `path` | `""` | Full path to the executable. Empty means: look in the installer's folder, then (for Codex) `CODEX_BIN`, then `PATH`, then npm's launcher. A `.js` path is run with the bridge's Node (from the binary: the `node` on the `PATH`, so an npm-installed CLI still works). |
 | `extraArgs` | `[]` | More command-line arguments, added verbatim (before Codex's `resume` subcommand). |
 | `networkAccess` (codex only) | `false` | `true` lets commands inside Codex's `workspace-write` sandbox reach the network (`-c sandbox_workspace_write.network_access=true`). |
+
+### The local agent
+
+`agents.local` runs chats on a model on your own PC, through any server that speaks the OpenAI chat completions API. It costs nothing per message. It is never the default: pick it per chat with `/claude --agent local`, or set `"agent": "local"`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `baseUrl` | `"http://127.0.0.1:8080/v1"` | The server's OpenAI base URL. The bridge posts to `<baseUrl>/chat/completions`. The game context and your messages go to this address, so keep it on your own PC. |
+| `model` | `"Qwen3-4B-Instruct-2507-Q4_K_M"` | The `model` field of each request. `llama-server` serves the one model it loaded, whatever this says. `/claude --model` overrides it per chat. |
+| `timeoutMs` | `120000` | How long one request to the server may take. The bridge's own `timeoutMs` still ends the whole run. |
+
+The suggested model is Qwen3-4B-Instruct-2507 at Q4_K_M (about 2.5 GB). Start it with [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`:
+
+```sh
+llama-server -hf lmstudio-community/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M --jinja -c 32768 --host 127.0.0.1 --port 8080
+```
+
+`--jinja` is needed for tool calls. Without it the model still answers, but it cannot use the game data tools.
+
+What it does:
+
+- The bridge runs `bridge/localagent.js` (`claude-wow local-agent` in the binary). It reads the system prompt and the message on stdin and prints Claude Code's stream-json, so the window shows progress, the session id and the context size as for Claude. The cost shows as $0.
+- In `ask` chats it gets the read-only `wowdata` tools from the same per-run MCP config Claude gets, and calls them in a loop of at most 6 tool steps. It has no web search, no files, no shell, and none of the `wowgoals` tools (goals, orders, campaigns stay Claude only).
+- A chat's history is kept in `~/.claude-wow/local-sessions/<session id>.json` (the last 40 messages, at most 200 chats), so `/claude -c` continues it.
+- A small model follows the rules for game names less reliably than Claude. Treat its answers as a cheap first try.
 
 A `config.json` from before agents existed kept Claude's settings at the top level (`claudePath`, `model`, `permissionMode`, `allowedTools`). The bridge still reads them, under anything in `agents.claude`; `setup.js` moves them down.
 
